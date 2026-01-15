@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue';
+import { Search, Loader2 } from 'lucide-vue-next';
 import spotifyApi from '../services/spotifyApi';
 import TrackList from './TrackList.vue';
 
@@ -55,7 +56,10 @@ const handleTrackSelect = (track) => {
         class="search-input"
       />
       <button @click="handleSearch" :disabled="isSearching" class="search-btn" :title="isSearching ? 'Searching...' : 'Search'">
-        <span class="search-icon">{{ isSearching ? '⏳' : '🔍' }}</span>
+        <span class="search-icon">
+          <Loader2 v-if="isSearching" class="spinning" />
+          <Search v-else />
+        </span>
         <span class="search-text">{{ isSearching ? 'Searching...' : 'Search' }}</span>
       </button>
     </div>
@@ -120,8 +124,20 @@ const handleTrackSelect = (track) => {
 
 .search-icon {
   display: none;
-  font-size: 1.3rem;
   line-height: 1;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .search-text {

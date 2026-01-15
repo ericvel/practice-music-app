@@ -22,7 +22,10 @@ const loadTrack = async (trackId) => {
     // Ignore errors
   }
   try {
-    await spotifyApi.pause();
+    const deviceId = spotifyPlayer.getDeviceId();
+    if (deviceId) {
+      await spotifyApi.pause(deviceId);
+    }
   } catch (err) {
     // Ignore errors
   }

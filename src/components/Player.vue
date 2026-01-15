@@ -1,7 +1,8 @@
 <script setup>
-import { ref, defineProps, onMounted, onUnmounted, watch } from 'vue';
-import spotifyApi from '../services/spotifyApi';
-import spotifyPlayer from '../services/spotifyPlayer';
+import { ref, defineProps, onMounted, onUnmounted, watch } from "vue";
+import { Rewind, Play, Pause, FastForward } from "lucide-vue-next";
+import spotifyApi from "../services/spotifyApi";
+import spotifyPlayer from "../services/spotifyPlayer";
 
 const props = defineProps({
   track: {
@@ -21,6 +22,11 @@ const hoverPosition = ref(0);
 const isDragging = ref(false);
 const previewPosition = ref(0);
 const isHovering = ref(false);
+const loopEnabled = ref(false);
+const loopStart = ref(0);
+const loopEnd = ref(0);
+const isDraggingLoopStart = ref(false);
+const isDraggingLoopEnd = ref(false);
 let dragStartTime = 0;
 let stateInterval = null;
 
@@ -37,23 +43,44 @@ const initializePlayer = async () => {
 
 const playTrack = async () => {
   if (isLoading.value) return;
-  
+
   isLoading.value = true;
   error.value = null;
 
   try {
     const deviceId = spotifyPlayer.getDeviceId();
     if (!deviceId) {
-      throw new Error('Player not ready');
+      throw new Error("Player not ready");
     }
-    
+
     await spotifyApi.playTrack(props.track.uri, deviceId);
     isPlaying.value = true;
-    
-    // Wait a bit for playback to start, then start polling
-    setTimeout(() => {
-      startStatePolling();
-    }, 500);
+
+    // Determine starting position
+    let startPosition = currentPosition.value;
+
+    // If loop is enabled, start from loop start
+    if (loopEnabled.value && loopStart.value > 0) {
+      startPosition = loopStart.value;
+    }
+
+    // If user has set a position or loop is enabled, seek to it
+    if (startPosition > 0) {
+      setTimeout(async () => {
+        try {
+          await spotifyPlayer.seek(startPosition);
+          currentPosition.value = startPosition;
+        } catch (err) {
+          // Ignore seek errors
+        }
+        startStatePolling();
+      }, 500);
+    } else {
+      // Wait a bit for playback to start, then start polling
+      setTimeout(() => {
+        startStatePolling();
+      }, 500);
+    }
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -63,19 +90,19 @@ const playTrack = async () => {
 
 const togglePlayPause = async () => {
   if (isLoading.value) return;
-  
+
   error.value = null;
 
   try {
     const state = await spotifyPlayer.getCurrentState();
-    
+
     // Check if we need to load a new track
     if (!state || state.track_window?.current_track?.uri !== props.track.uri) {
       // No state or different track, start playback of the selected track
       await playTrack();
       return;
     }
-    
+
     isLoading.value = true;
     if (state.paused) {
       await spotifyPlayer.resume();
@@ -93,14 +120,22 @@ const togglePlayPause = async () => {
 
 const rewind10s = async () => {
   if (isLoading.value) return;
-  
+
   isLoading.value = true;
   error.value = null;
 
   try {
     const state = await spotifyPlayer.getCurrentState();
     if (state) {
-      const newPosition = Math.max(0, state.position - 10000);
+      let newPosition = state.position - 10000;
+
+      // If loop is enabled, constrain to loop boundaries
+      if (loopEnabled.value && loopEnd.value > loopStart.value) {
+        newPosition = Math.max(loopStart.value, newPosition);
+      } else {
+        newPosition = Math.max(0, newPosition);
+      }
+
       await spotifyPlayer.seek(newPosition);
       currentPosition.value = newPosition;
     }
@@ -113,14 +148,22 @@ const rewind10s = async () => {
 
 const forward10s = async () => {
   if (isLoading.value) return;
-  
+
   isLoading.value = true;
   error.value = null;
 
   try {
     const state = await spotifyPlayer.getCurrentState();
     if (state) {
-      const newPosition = Math.min(state.duration, state.position + 10000);
+      let newPosition = state.position + 10000;
+
+      // If loop is enabled, constrain to loop boundaries
+      if (loopEnabled.value && loopEnd.value > loopStart.value) {
+        newPosition = Math.min(loopEnd.value, newPosition);
+      } else {
+        newPosition = Math.min(state.duration, newPosition);
+      }
+
       await spotifyPlayer.seek(newPosition);
       currentPosition.value = newPosition;
     }
@@ -140,11 +183,23 @@ const startStatePolling = () => {
         isPlaying.value = !state.paused;
         currentPosition.value = state.position;
         duration.value = state.duration;
+
+        // Check if we need to loop
+        if (
+          loopEnabled.value &&
+          loopEnd.value > loopStart.value &&
+          !state.paused
+        ) {
+          if (state.position >= loopEnd.value) {
+            await spotifyPlayer.seek(loopStart.value);
+            currentPosition.value = loopStart.value;
+          }
+        }
       }
     } catch (err) {
       // Silently fail - player might be disconnected
     }
-  }, 1000);
+  }, 100);
 };
 
 const stopStatePolling = () => {
@@ -158,7 +213,36 @@ const formatTime = (ms) => {
   const totalSeconds = Math.floor(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+};
+
+const parseTime = (timeString) => {
+  const parts = timeString.split(":");
+  if (parts.length !== 2) return 0;
+  const minutes = parseInt(parts[0], 10) || 0;
+  const seconds = parseInt(parts[1], 10) || 0;
+  return (minutes * 60 + seconds) * 1000;
+};
+
+const handleLoopStartInput = (event) => {
+  const newTime = parseTime(event.target.value);
+  if (newTime >= 0 && newTime < loopEnd.value) {
+    loopStart.value = newTime;
+  }
+};
+
+const handleLoopEndInput = (event) => {
+  const newTime = parseTime(event.target.value);
+  if (newTime > loopStart.value && newTime <= duration.value) {
+    loopEnd.value = newTime;
+  }
+};
+
+const constrainToLoop = (position) => {
+  if (!loopEnabled.value || loopEnd.value <= loopStart.value) {
+    return position;
+  }
+  return Math.max(loopStart.value, Math.min(position, loopEnd.value));
 };
 
 const seekToPosition = (event) => {
@@ -167,19 +251,19 @@ const seekToPosition = (event) => {
   const barWidth = progressBar.offsetWidth;
   const percentage = clickPosition / barWidth;
   const newPosition = Math.floor(percentage * duration.value);
-  
+
   spotifyPlayer.seek(newPosition);
   currentPosition.value = newPosition;
 };
 
 const handleProgressHover = (event) => {
   if (isDragging.value) return;
-  
+
   const progressBar = event.currentTarget;
   const hoverX = event.offsetX;
   const barWidth = progressBar.offsetWidth;
   const percentage = hoverX / barWidth;
-  
+
   hoverTime.value = Math.floor(percentage * duration.value);
   hoverPosition.value = percentage * 100;
   previewPosition.value = Math.floor(percentage * duration.value);
@@ -195,37 +279,48 @@ const handleProgressLeave = () => {
 };
 
 const handleProgressMouseDown = (event) => {
+  // Don't start progress drag if clicking on loop markers
+  if (event.target.classList.contains("loop-marker-head")) {
+    return;
+  }
+
   event.preventDefault();
   isDragging.value = true;
   dragStartTime = Date.now();
   isHovering.value = false;
-  
+
   const progressBar = event.currentTarget;
   const clickPosition = event.offsetX;
   const barWidth = progressBar.offsetWidth;
   const percentage = clickPosition / barWidth;
-  const newPosition = Math.floor(percentage * duration.value);
-  
+  let newPosition = Math.floor(percentage * duration.value);
+
+  // Constrain to loop if enabled
+  newPosition = constrainToLoop(newPosition);
+
   previewPosition.value = newPosition;
   hoverTime.value = newPosition;
   hoverPosition.value = percentage * 100;
   showHoverTime.value = true;
-  
-  document.addEventListener('mousemove', handleDragMove);
-  document.addEventListener('mouseup', handleDragEnd);
+
+  document.addEventListener("mousemove", handleDragMove);
+  document.addEventListener("mouseup", handleDragEnd);
 };
 
 const handleDragMove = (event) => {
   if (!isDragging.value) return;
-  
-  const progressBar = document.querySelector('.progress-bar-bg');
+
+  const progressBar = document.querySelector(".progress-bar-bg");
   if (!progressBar) return;
-  
+
   const rect = progressBar.getBoundingClientRect();
   const offsetX = Math.max(0, Math.min(event.clientX - rect.left, rect.width));
   const percentage = offsetX / rect.width;
-  const newPosition = Math.floor(percentage * duration.value);
-  
+  let newPosition = Math.floor(percentage * duration.value);
+
+  // Constrain to loop if enabled
+  newPosition = constrainToLoop(newPosition);
+
   previewPosition.value = newPosition;
   hoverTime.value = newPosition;
   hoverPosition.value = percentage * 100;
@@ -235,18 +330,18 @@ const handleDragMove = (event) => {
 const handleDragEnd = () => {
   if (isDragging.value) {
     const wasQuickClick = Date.now() - dragStartTime < 200;
-    
+
     spotifyPlayer.seek(previewPosition.value);
     currentPosition.value = previewPosition.value;
-    
+
     isDragging.value = false;
     showHoverTime.value = false;
     isHovering.value = false;
   }
-  document.removeEventListener('mousemove', handleDragMove);
-  document.removeEventListener('mouseup', handleDragEnd);
-  document.removeEventListener('touchmove', handleTouchMove);
-  document.removeEventListener('touchend', handleTouchEnd);
+  document.removeEventListener("mousemove", handleDragMove);
+  document.removeEventListener("mouseup", handleDragEnd);
+  document.removeEventListener("touchmove", handleTouchMove);
+  document.removeEventListener("touchend", handleTouchEnd);
 };
 
 const handleProgressTouchStart = (event) => {
@@ -254,7 +349,7 @@ const handleProgressTouchStart = (event) => {
   isDragging.value = true;
   dragStartTime = Date.now();
   isHovering.value = false;
-  
+
   const touch = event.touches[0];
   const progressBar = event.currentTarget;
   const rect = progressBar.getBoundingClientRect();
@@ -262,29 +357,29 @@ const handleProgressTouchStart = (event) => {
   const barWidth = rect.width;
   const percentage = touchX / barWidth;
   const newPosition = Math.floor(percentage * duration.value);
-  
+
   previewPosition.value = newPosition;
   hoverTime.value = newPosition;
   hoverPosition.value = percentage * 100;
   showHoverTime.value = true;
-  
-  document.addEventListener('touchmove', handleTouchMove, { passive: false });
-  document.addEventListener('touchend', handleTouchEnd);
+
+  document.addEventListener("touchmove", handleTouchMove, { passive: false });
+  document.addEventListener("touchend", handleTouchEnd);
 };
 
 const handleTouchMove = (event) => {
   if (!isDragging.value) return;
   event.preventDefault();
-  
-  const progressBar = document.querySelector('.progress-bar-bg');
+
+  const progressBar = document.querySelector(".progress-bar-bg");
   if (!progressBar) return;
-  
+
   const touch = event.touches[0];
   const rect = progressBar.getBoundingClientRect();
   const offsetX = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
   const percentage = offsetX / rect.width;
   const newPosition = Math.floor(percentage * duration.value);
-  
+
   previewPosition.value = newPosition;
   hoverTime.value = newPosition;
   hoverPosition.value = percentage * 100;
@@ -297,65 +392,219 @@ const handleTouchEnd = () => {
 
 const handleKeyPress = (event) => {
   // Ignore if user is typing in an input field
-  if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+  if (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA") {
     return;
   }
-  
+
   switch (event.code) {
-    case 'Space':
+    case "Space":
       event.preventDefault();
       togglePlayPause();
       break;
-    case 'ArrowLeft':
+    case "ArrowLeft":
       event.preventDefault();
       rewind10s();
       break;
-    case 'ArrowRight':
+    case "ArrowRight":
       event.preventDefault();
       forward10s();
+      break;
+    case "KeyL":
+      event.preventDefault();
+      toggleLoop();
+      break;
+    case "BracketLeft":
+      event.preventDefault();
+      setLoopStart();
+      break;
+    case "BracketRight":
+      event.preventDefault();
+      setLoopEnd();
       break;
   }
 };
 
-// Watch for track changes
-watch(() => props.track, async (newTrack, oldTrack) => {
-  if (newTrack && oldTrack && newTrack.id !== oldTrack.id) {
-    // Stop current playback and reset state
-    stopStatePolling();
-    
-    // Try to pause using both the player and the API
-    try {
-      await spotifyPlayer.pause();
-    } catch (err) {
-      // Ignore errors if player not ready
+const toggleLoop = async () => {
+  const wasEnabled = loopEnabled.value;
+  loopEnabled.value = !loopEnabled.value;
+
+  // When enabling loop, set start to current position
+  if (loopEnabled.value && !wasEnabled) {
+    loopStart.value = currentPosition.value;
+
+    // If end is not set or is before start, set it to 15 seconds after start
+    if (loopEnd.value === 0 || loopEnd.value <= loopStart.value) {
+      loopEnd.value = Math.min(loopStart.value + 15000, duration.value);
     }
-    
-    try {
-      await spotifyApi.pause();
-    } catch (err) {
-      // Ignore errors if nothing is playing
+
+    // If song is playing, pause and move to loop start
+    if (isPlaying.value) {
+      try {
+        await spotifyPlayer.pause();
+        isPlaying.value = false;
+
+        if (loopStart.value > 0) {
+          await spotifyPlayer.seek(loopStart.value);
+          currentPosition.value = loopStart.value;
+        }
+      } catch (err) {
+        // Ignore errors
+      }
     }
-    
-    isPlaying.value = false;
-    currentPosition.value = 0;
-    duration.value = newTrack.duration_ms || 0;
-    // Don't autoplay - user needs to press play button
   }
+};
+
+const setLoopStart = () => {
+  loopStart.value = currentPosition.value;
+  if (loopStart.value >= loopEnd.value) {
+    loopEnd.value = Math.min(loopStart.value + 5000, duration.value);
+  }
+  if (!loopEnabled.value) {
+    loopEnabled.value = true;
+  }
+};
+
+const setLoopEnd = () => {
+  loopEnd.value = currentPosition.value;
+  if (loopEnd.value <= loopStart.value) {
+    loopStart.value = Math.max(0, loopEnd.value - 5000);
+  }
+  if (!loopEnabled.value) {
+    loopEnabled.value = true;
+  }
+};
+
+const handleLoopStartDrag = (event) => {
+  event.stopPropagation();
+  event.preventDefault();
+  isDraggingLoopStart.value = true;
   
-  // Set duration whenever track changes
-  if (newTrack) {
-    duration.value = newTrack.duration_ms || 0;
+  // Pause playback when starting to drag
+  if (isPlaying.value) {
+    spotifyPlayer.pause().catch(() => {});
+    isPlaying.value = false;
   }
-}, { immediate: true });
+
+  const handleMove = (e) => {
+    if (!isDraggingLoopStart.value) return;
+
+    const progressBar = document.querySelector(".progress-bar-bg");
+    if (!progressBar) return;
+
+    const rect = progressBar.getBoundingClientRect();
+    const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const percentage = offsetX / rect.width;
+    const newPosition = Math.floor(percentage * duration.value);
+
+    loopStart.value = Math.min(newPosition, loopEnd.value - 1000);
+  };
+
+  const handleEnd = () => {
+    isDraggingLoopStart.value = false;
+    document.removeEventListener("mousemove", handleMove);
+    document.removeEventListener("mouseup", handleEnd);
+    
+    // Seek to loop start if it's beyond current position
+    if (loopStart.value > currentPosition.value) {
+      currentPosition.value = loopStart.value;
+      spotifyPlayer.seek(loopStart.value).catch(() => {});
+    }
+  };
+
+  document.addEventListener("mousemove", handleMove);
+  document.addEventListener("mouseup", handleEnd);
+};
+
+const handleLoopEndDrag = (event) => {
+  event.stopPropagation();
+  event.preventDefault();
+  isDraggingLoopEnd.value = true;
+  
+  // Pause playback when starting to drag
+  if (isPlaying.value) {
+    spotifyPlayer.pause().catch(() => {});
+    isPlaying.value = false;
+  }
+
+  const handleMove = (e) => {
+    if (!isDraggingLoopEnd.value) return;
+
+    const progressBar = document.querySelector(".progress-bar-bg");
+    if (!progressBar) return;
+
+    const rect = progressBar.getBoundingClientRect();
+    const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const percentage = offsetX / rect.width;
+    const newPosition = Math.floor(percentage * duration.value);
+
+    loopEnd.value = Math.max(newPosition, loopStart.value + 1000);
+  };
+
+  const handleEnd = () => {
+    isDraggingLoopEnd.value = false;
+    document.removeEventListener("mousemove", handleMove);
+    document.removeEventListener("mouseup", handleEnd);
+    
+    // Seek to loop end if it's before current position
+    if (loopEnd.value < currentPosition.value) {
+      currentPosition.value = loopEnd.value;
+      spotifyPlayer.seek(loopEnd.value).catch(() => {});
+    }
+  };
+
+  document.addEventListener("mousemove", handleMove);
+  document.addEventListener("mouseup", handleEnd);
+};
+
+// Watch for track changes
+watch(
+  () => props.track,
+  async (newTrack, oldTrack) => {
+    if (newTrack && oldTrack && newTrack.id !== oldTrack.id) {
+      // Stop current playback and reset state
+      stopStatePolling();
+
+      // Try to pause using both the player and the API
+      try {
+        await spotifyPlayer.pause();
+      } catch (err) {
+        // Ignore errors if player not ready
+      }
+
+      try {
+        const deviceId = spotifyPlayer.getDeviceId();
+        if (deviceId) {
+          await spotifyApi.pause(deviceId);
+        }
+      } catch (err) {
+        // Ignore errors if nothing is playing
+      }
+
+      isPlaying.value = false;
+      currentPosition.value = 0;
+      duration.value = newTrack.duration_ms || 0;
+      loopEnabled.value = false;
+      loopStart.value = 0;
+      loopEnd.value = 0;
+      // Don't autoplay - user needs to press play button
+    }
+
+    // Set duration whenever track changes
+    if (newTrack) {
+      duration.value = newTrack.duration_ms || 0;
+    }
+  },
+  { immediate: true }
+);
 
 onMounted(() => {
   initializePlayer();
-  window.addEventListener('keydown', handleKeyPress);
+  window.addEventListener("keydown", handleKeyPress);
 });
 
 onUnmounted(() => {
   stopStatePolling();
-  window.removeEventListener('keydown', handleKeyPress);
+  window.removeEventListener("keydown", handleKeyPress);
 });
 </script>
 
@@ -370,7 +619,9 @@ onUnmounted(() => {
       />
       <div class="track-details">
         <h2 class="track-title">{{ track.name }}</h2>
-        <p class="track-artists">{{ track.artists.map(a => a.name).join(', ') }}</p>
+        <p class="track-artists">
+          {{ track.artists.map((a) => a.name).join(", ") }}
+        </p>
         <p class="track-album">{{ track.album.name }}</p>
       </div>
     </div>
@@ -380,46 +631,154 @@ onUnmounted(() => {
     </div>
 
     <div class="controls">
-      <button @click="rewind10s" :disabled="isLoading" class="control-btn" title="Rewind 10 seconds">
-        ⏪
+      <button
+        @click="rewind10s"
+        :disabled="isLoading"
+        class="control-btn"
+        title="Rewind 10 seconds"
+      >
+        <Rewind />
       </button>
-      <button @click="togglePlayPause" :disabled="isLoading" class="control-btn play-pause">
-        {{ isPlaying ? '⏸️' : '▶️' }}
+      <button
+        @click="togglePlayPause"
+        :disabled="isLoading"
+        class="control-btn play-pause"
+      >
+        <Play v-if="!isPlaying" />
+        <Pause v-else />
       </button>
-      <button @click="forward10s" :disabled="isLoading" class="control-btn" title="Forward 10 seconds">
-        ⏩
+      <button
+        @click="forward10s"
+        :disabled="isLoading"
+        class="control-btn"
+        title="Forward 10 seconds"
+      >
+        <FastForward />
       </button>
     </div>
 
+    <div class="loop-section">
+      <div class="loop-toggle-container">
+        <div class="loop-toggle-label" @click="toggleLoop">
+          <span class="loop-label-text">Loop Section</span>
+          <div class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="loopEnabled"
+              class="toggle-input"
+              readonly
+            />
+            <span class="toggle-slider"></span>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="loopEnabled" class="loop-controls">
+        <div class="loop-time-input-group">
+          <label class="loop-time-label">Start:</label>
+          <input
+            type="text"
+            :value="formatTime(loopStart)"
+            @change="handleLoopStartInput"
+            @blur="handleLoopStartInput"
+            :disabled="!loopEnabled"
+            class="loop-time-input"
+            placeholder="0:00"
+            title="Set Loop Start (MM:SS)"
+          />
+        </div>
+        <div class="loop-time-input-group">
+          <label class="loop-time-label">End:</label>
+          <input
+            type="text"
+            :value="formatTime(loopEnd)"
+            @change="handleLoopEndInput"
+            @blur="handleLoopEndInput"
+            :disabled="!loopEnabled"
+            class="loop-time-input"
+            placeholder="0:00"
+            title="Set Loop End (MM:SS)"
+          />
+        </div>
+      </div>
+    </div>
+
     <div class="progress-section">
-      <div 
-        class="progress-bar-container" 
+      <div
+        class="progress-bar-container"
         @mousedown="handleProgressMouseDown"
         @touchstart="handleProgressTouchStart"
         @mousemove="handleProgressHover"
         @mouseleave="handleProgressLeave"
       >
         <div class="progress-bar-bg">
-          <div 
-            class="progress-bar-fill" 
+          <div
+            class="progress-bar-fill"
             :class="{ 'no-transition': isDragging }"
-            :style="{ width: duration > 0 ? ((isDragging ? previewPosition : currentPosition) / duration * 100) + '%' : '0%' }"
-          ></div>
-          <div 
-            v-if="isHovering && !isDragging && duration > 0 && previewPosition > currentPosition"
-            class="progress-bar-preview"
-            :style="{ 
-              left: currentPosition / duration * 100 + '%',
-              width: (previewPosition - currentPosition) / duration * 100 + '%'
+            :style="{
+              left: loopEnabled && duration > 0 ? (loopStart / duration) * 100 + '%' : '0%',
+              width: loopEnabled && duration > 0
+                ? (((isDragging ? previewPosition : currentPosition) - loopStart) / duration) * 100 + '%'
+                : duration > 0
+                  ? ((isDragging ? previewPosition : currentPosition) / duration) * 100 + '%'
+                  : '0%',
             }"
           ></div>
-          <div 
+          <div
+            v-if="
+              isHovering &&
+              !isDragging &&
+              duration > 0 &&
+              previewPosition > currentPosition
+            "
+            class="progress-bar-preview"
+            :style="{
+              left: (currentPosition / duration) * 100 + '%',
+              width:
+                ((previewPosition - currentPosition) / duration) * 100 + '%',
+            }"
+          ></div>
+          <div
+            v-if="loopEnabled && duration > 0"
+            class="loop-segment"
+            :style="{
+              left: (loopStart / duration) * 100 + '%',
+              width: ((loopEnd - loopStart) / duration) * 100 + '%',
+            }"
+          ></div>
+          <div
+            v-if="loopEnabled && duration > 0"
+            class="loop-marker-head loop-marker-start"
+            :style="{ left: (loopStart / duration) * 100 + '%' }"
+            @mousedown="handleLoopStartDrag"
+            title="Drag to adjust loop start"
+          >
+            <div class="loop-marker-line"></div>
+          </div>
+          <div
+            v-if="loopEnabled && duration > 0"
+            class="loop-marker-head loop-marker-end"
+            :style="{ left: (loopEnd / duration) * 100 + '%' }"
+            @mousedown="handleLoopEndDrag"
+            title="Drag to adjust loop end"
+          >
+            <div class="loop-marker-line"></div>
+          </div>
+          <div
             class="progress-marker"
-            :style="{ left: duration > 0 ? ((isDragging ? previewPosition : currentPosition) / duration * 100) + '%' : '0%' }"
+            :style="{
+              left:
+                duration > 0
+                  ? ((isDragging ? previewPosition : currentPosition) /
+                      duration) *
+                      100 +
+                    '%'
+                  : '0%',
+            }"
           ></div>
         </div>
-        <div 
-          v-if="showHoverTime" 
+        <div
+          v-if="showHoverTime"
           class="hover-time-tooltip"
           :style="{ left: hoverPosition + '%' }"
         >
@@ -493,7 +852,120 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.loop-section {
   margin-bottom: 1rem;
+}
+
+.loop-toggle-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.loop-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.loop-label-text {
+  font-size: 1rem;
+  color: #333;
+  font-weight: 500;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 50px;
+  height: 26px;
+}
+
+.toggle-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.3s;
+  border-radius: 26px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+}
+
+.toggle-input:checked + .toggle-slider {
+  background-color: #1db954;
+}
+
+.toggle-input:checked + .toggle-slider:before {
+  transform: translateX(24px);
+}
+
+.toggle-switch:hover .toggle-slider {
+  box-shadow: 0 0 1px #1db954;
+}
+
+.loop-controls {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-bottom: 1rem;
+}
+
+.loop-time-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.loop-time-label {
+  font-size: 0.9rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.loop-time-input {
+  width: 80px;
+  padding: 6px 10px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  text-align: center;
+  transition: border-color 0.3s;
+}
+
+.loop-time-input:focus {
+  outline: none;
+  border-color: #1db954;
+}
+
+.loop-time-input:disabled {
+  background: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
 }
 
 .progress-section {
@@ -514,31 +986,31 @@ onUnmounted(() => {
 
 .progress-bar-container {
   cursor: pointer;
-  padding: 12px 0;
+  padding: 20px 0;
   position: relative;
   user-select: none;
 }
 
 .progress-bar-bg {
   width: 100%;
-  height: 12px;
+  height: 18px;
   background: #e0e0e0;
-  border-radius: 6px;
+  border-radius: 9999px;
   overflow: visible;
   transition: height 0.2s;
   position: relative;
 }
 
 .progress-bar-container:hover .progress-bar-bg {
-  height: 14px;
+  height: 20px;
 }
 
 .progress-bar-fill {
   height: 100%;
   background: #1db954;
   transition: width 0.1s linear;
-  border-radius: 6px;
-  position: relative;
+  border-radius: 9999px;
+  position: absolute;
   z-index: 1;
 }
 
@@ -553,17 +1025,69 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.4);
   pointer-events: none;
   z-index: 2;
-  border-radius: 6px;
+  border-radius: 9999px;
+}
+
+.loop-segment {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(29, 185, 84, 0.2);
+  pointer-events: none;
+  z-index: 2;
+  border-radius: 9999px;
+}
+
+.loop-marker-head {
+  position: absolute;
+  top: -28px;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 20px;
+  background: #1db954;
+  border: 2px solid white;
+  border-radius: 50%;
+  cursor: grab;
+  z-index: 6;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s;
+}
+
+.loop-marker-head:hover {
+  transform: translateX(-50%) scale(1.1);
+}
+
+.loop-marker-head:active {
+  cursor: grabbing;
+}
+
+.loop-marker-line {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 30px;
+  background: #1db954;
+  pointer-events: none;
+}
+
+.loop-marker-start .loop-marker-line {
+  background: linear-gradient(to bottom, #1db954, rgba(29, 185, 84, 0.3));
+}
+
+.loop-marker-end .loop-marker-line {
+  background: linear-gradient(to bottom, #1db954, rgba(29, 185, 84, 0.3));
 }
 
 .progress-marker {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   background: white;
-  border: 2px solid #1db954;
+  border: 3px solid #1db954;
   border-radius: 50%;
   cursor: grab;
   opacity: 0;
@@ -599,7 +1123,6 @@ onUnmounted(() => {
   border: none;
   padding: 20px 40px;
   border-radius: 8px;
-  font-size: 1.4rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s;
@@ -617,7 +1140,6 @@ onUnmounted(() => {
 .control-btn.play-pause {
   background: #1db954;
   padding: 16px 32px;
-  font-size: 1.1rem;
 }
 
 .control-btn.play-pause:hover:not(:disabled) {
@@ -628,10 +1150,8 @@ onUnmounted(() => {
   .player {
     padding: 1rem;
   }
-  
+
   .track-display {
-    /* align-items: center; */
-    /* text-align: center; */
     margin-bottom: 3rem;
   }
 
@@ -654,12 +1174,10 @@ onUnmounted(() => {
 
   .control-btn {
     padding: 16px 28px;
-    font-size: 1.2rem;
   }
 
   .control-btn.play-pause {
     padding: 14px 24px;
-    font-size: 1rem;
   }
 }
 </style>

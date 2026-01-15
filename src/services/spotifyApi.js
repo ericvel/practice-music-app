@@ -87,8 +87,9 @@ class SpotifyApiService {
   /**
    * Pause playback
    */
-  async pause() {
-    return this.makeRequest('/me/player/pause', {
+  async pause(deviceId = null) {
+    const params = deviceId ? `?device_id=${deviceId}` : '';
+    return this.makeRequest(`/me/player/pause${params}`, {
       method: 'PUT',
     });
   }
@@ -96,8 +97,9 @@ class SpotifyApiService {
   /**
    * Resume playback
    */
-  async play() {
-    return this.makeRequest('/me/player/play', {
+  async play(deviceId = null) {
+    const params = deviceId ? `?device_id=${deviceId}` : '';
+    return this.makeRequest(`/me/player/play${params}`, {
       method: 'PUT',
     });
   }
@@ -105,8 +107,12 @@ class SpotifyApiService {
   /**
    * Seek to position in currently playing track
    */
-  async seek(positionMs) {
-    return this.makeRequest(`/me/player/seek?position_ms=${positionMs}`, {
+  async seek(positionMs, deviceId = null) {
+    const params = new URLSearchParams({ position_ms: positionMs });
+    if (deviceId) {
+      params.append('device_id', deviceId);
+    }
+    return this.makeRequest(`/me/player/seek?${params.toString()}`, {
       method: 'PUT',
     });
   }
