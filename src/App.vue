@@ -1,13 +1,11 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 import spotifyAuth from './services/spotifyAuth';
 import spotifyPlayer from './services/spotifyPlayer';
-import SearchBar from './components/SearchBar.vue';
-import TrackList from './components/TrackList.vue';
-import Player from './components/Player.vue';
 
+const router = useRouter();
 const isAuthenticated = ref(false);
-const selectedTrack = ref(null);
 const isLoading = ref(false);
 const error = ref(null);
 
@@ -46,11 +44,7 @@ const handleLogout = () => {
   spotifyPlayer.disconnect();
   spotifyAuth.logout();
   isAuthenticated.value = false;
-  selectedTrack.value = null;
-};
-
-const handleTrackSelect = (track) => {
-  selectedTrack.value = track;
+  router.push('/');
 };
 </script>
 
@@ -82,8 +76,7 @@ const handleTrackSelect = (track) => {
       </div>
 
       <div v-else class="app-container">
-        <SearchBar @track-select="handleTrackSelect" />
-        <Player v-if="selectedTrack" :track="selectedTrack" />
+        <router-view />
       </div>
     </main>
   </div>
@@ -208,5 +201,24 @@ main {
 
 button {
   font-family: inherit;
+}
+
+@media (max-width: 640px) {
+  header {
+    padding: 1rem;
+  }
+  
+  h1 {
+    font-size: 1.2rem;
+  }
+  
+  main {
+    padding: 1rem;
+  }
+  
+  .login-card {
+    padding: 2rem 1.5rem;
+    margin: 0 1rem;
+  }
 }
 </style>

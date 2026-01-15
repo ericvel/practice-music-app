@@ -54,8 +54,9 @@ const handleTrackSelect = (track) => {
         placeholder="Search for a track..."
         class="search-input"
       />
-      <button @click="handleSearch" :disabled="isSearching" class="search-btn">
-        {{ isSearching ? 'Searching...' : 'Search' }}
+      <button @click="handleSearch" :disabled="isSearching" class="search-btn" :title="isSearching ? 'Searching...' : 'Search'">
+        <span class="search-icon">{{ isSearching ? '⏳' : '🔍' }}</span>
+        <span class="search-text">{{ isSearching ? 'Searching...' : 'Search' }}</span>
       </button>
     </div>
 
@@ -92,6 +93,7 @@ const handleTrackSelect = (track) => {
   border-radius: 8px;
   font-size: 1rem;
   transition: border-color 0.3s;
+  width:100%;
 }
 
 .search-input:focus {
@@ -109,6 +111,40 @@ const handleTrackSelect = (track) => {
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-width: 48px;
+}
+
+.search-icon {
+  display: none;
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.search-text {
+  display: inline-block;
+}
+
+@media (max-width: 640px) {
+  .search-bar {
+    padding: 1rem;
+  }
+  
+  .search-btn {
+    width: 46px;
+    height: 46px;
+  }
+  
+  .search-icon {
+    display: inline-block;
+  }
+  
+  .search-text {
+    display: none;
+  }
 }
 
 .search-btn:hover:not(:disabled) {

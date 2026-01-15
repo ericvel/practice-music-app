@@ -135,6 +135,13 @@ class SpotifyApiService {
       return this.seek(newPosition);
     }
   }
+
+  /**
+   * Get a single track by ID
+   */
+  async getTrack(trackId) {
+    return this.makeRequest(`/tracks/${trackId}`);
+  }
 }
 
 export default new SpotifyApiService();

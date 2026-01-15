@@ -19,6 +19,9 @@ const hoverTime = ref(0);
 const showHoverTime = ref(false);
 const hoverPosition = ref(0);
 const isDragging = ref(false);
+const previewPosition = ref(0);
+const isHovering = ref(false);
+let dragStartTime = 0;
 let stateInterval = null;
 
 const initializePlayer = async () => {
@@ -170,6 +173,8 @@ const seekToPosition = (event) => {
 };
 
 const handleProgressHover = (event) => {
+  if (isDragging.value) return;
+  
   const progressBar = event.currentTarget;
   const hoverX = event.offsetX;
   const barWidth = progressBar.offsetWidth;
@@ -177,16 +182,35 @@ const handleProgressHover = (event) => {
   
   hoverTime.value = Math.floor(percentage * duration.value);
   hoverPosition.value = percentage * 100;
+  previewPosition.value = Math.floor(percentage * duration.value);
   showHoverTime.value = true;
+  isHovering.value = true;
 };
 
 const handleProgressLeave = () => {
-  showHoverTime.value = false;
+  if (!isDragging.value) {
+    showHoverTime.value = false;
+    isHovering.value = false;
+  }
 };
 
 const handleProgressMouseDown = (event) => {
+  event.preventDefault();
   isDragging.value = true;
-  seekToPosition(event);
+  dragStartTime = Date.now();
+  isHovering.value = false;
+  
+  const progressBar = event.currentTarget;
+  const clickPosition = event.offsetX;
+  const barWidth = progressBar.offsetWidth;
+  const percentage = clickPosition / barWidth;
+  const newPosition = Math.floor(percentage * duration.value);
+  
+  previewPosition.value = newPosition;
+  hoverTime.value = newPosition;
+  hoverPosition.value = percentage * 100;
+  showHoverTime.value = true;
+  
   document.addEventListener('mousemove', handleDragMove);
   document.addEventListener('mouseup', handleDragEnd);
 };
@@ -202,7 +226,7 @@ const handleDragMove = (event) => {
   const percentage = offsetX / rect.width;
   const newPosition = Math.floor(percentage * duration.value);
   
-  currentPosition.value = newPosition;
+  previewPosition.value = newPosition;
   hoverTime.value = newPosition;
   hoverPosition.value = percentage * 100;
   showHoverTime.value = true;
@@ -210,12 +234,65 @@ const handleDragMove = (event) => {
 
 const handleDragEnd = () => {
   if (isDragging.value) {
-    spotifyPlayer.seek(currentPosition.value);
+    const wasQuickClick = Date.now() - dragStartTime < 200;
+    
+    spotifyPlayer.seek(previewPosition.value);
+    currentPosition.value = previewPosition.value;
+    
     isDragging.value = false;
     showHoverTime.value = false;
+    isHovering.value = false;
   }
   document.removeEventListener('mousemove', handleDragMove);
   document.removeEventListener('mouseup', handleDragEnd);
+  document.removeEventListener('touchmove', handleTouchMove);
+  document.removeEventListener('touchend', handleTouchEnd);
+};
+
+const handleProgressTouchStart = (event) => {
+  event.preventDefault();
+  isDragging.value = true;
+  dragStartTime = Date.now();
+  isHovering.value = false;
+  
+  const touch = event.touches[0];
+  const progressBar = event.currentTarget;
+  const rect = progressBar.getBoundingClientRect();
+  const touchX = touch.clientX - rect.left;
+  const barWidth = rect.width;
+  const percentage = touchX / barWidth;
+  const newPosition = Math.floor(percentage * duration.value);
+  
+  previewPosition.value = newPosition;
+  hoverTime.value = newPosition;
+  hoverPosition.value = percentage * 100;
+  showHoverTime.value = true;
+  
+  document.addEventListener('touchmove', handleTouchMove, { passive: false });
+  document.addEventListener('touchend', handleTouchEnd);
+};
+
+const handleTouchMove = (event) => {
+  if (!isDragging.value) return;
+  event.preventDefault();
+  
+  const progressBar = document.querySelector('.progress-bar-bg');
+  if (!progressBar) return;
+  
+  const touch = event.touches[0];
+  const rect = progressBar.getBoundingClientRect();
+  const offsetX = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
+  const percentage = offsetX / rect.width;
+  const newPosition = Math.floor(percentage * duration.value);
+  
+  previewPosition.value = newPosition;
+  hoverTime.value = newPosition;
+  hoverPosition.value = percentage * 100;
+  showHoverTime.value = true;
+};
+
+const handleTouchEnd = () => {
+  handleDragEnd();
 };
 
 const handleKeyPress = (event) => {
@@ -241,14 +318,35 @@ const handleKeyPress = (event) => {
 };
 
 // Watch for track changes
-watch(() => props.track, (newTrack, oldTrack) => {
+watch(() => props.track, async (newTrack, oldTrack) => {
   if (newTrack && oldTrack && newTrack.id !== oldTrack.id) {
     // Stop current playback and reset state
     stopStatePolling();
+    
+    // Try to pause using both the player and the API
+    try {
+      await spotifyPlayer.pause();
+    } catch (err) {
+      // Ignore errors if player not ready
+    }
+    
+    try {
+      await spotifyApi.pause();
+    } catch (err) {
+      // Ignore errors if nothing is playing
+    }
+    
     isPlaying.value = false;
+    currentPosition.value = 0;
+    duration.value = newTrack.duration_ms || 0;
     // Don't autoplay - user needs to press play button
   }
-});
+  
+  // Set duration whenever track changes
+  if (newTrack) {
+    duration.value = newTrack.duration_ms || 0;
+  }
+}, { immediate: true });
 
 onMounted(() => {
   initializePlayer();
@@ -283,32 +381,41 @@ onUnmounted(() => {
 
     <div class="controls">
       <button @click="rewind10s" :disabled="isLoading" class="control-btn" title="Rewind 10 seconds">
-        ⏪ -10s
+        ⏪
       </button>
       <button @click="togglePlayPause" :disabled="isLoading" class="control-btn play-pause">
-        {{ isPlaying ? '⏸️ Pause' : '▶️ Play' }}
+        {{ isPlaying ? '⏸️' : '▶️' }}
       </button>
       <button @click="forward10s" :disabled="isLoading" class="control-btn" title="Forward 10 seconds">
-        +10s ⏩
+        ⏩
       </button>
     </div>
 
     <div class="progress-section">
       <div 
         class="progress-bar-container" 
-        @click="seekToPosition"
         @mousedown="handleProgressMouseDown"
+        @touchstart="handleProgressTouchStart"
         @mousemove="handleProgressHover"
         @mouseleave="handleProgressLeave"
       >
         <div class="progress-bar-bg">
           <div 
             class="progress-bar-fill" 
-            :style="{ width: duration > 0 ? (currentPosition / duration * 100) + '%' : '0%' }"
+            :class="{ 'no-transition': isDragging }"
+            :style="{ width: duration > 0 ? ((isDragging ? previewPosition : currentPosition) / duration * 100) + '%' : '0%' }"
+          ></div>
+          <div 
+            v-if="isHovering && !isDragging && duration > 0 && previewPosition > currentPosition"
+            class="progress-bar-preview"
+            :style="{ 
+              left: currentPosition / duration * 100 + '%',
+              width: (previewPosition - currentPosition) / duration * 100 + '%'
+            }"
           ></div>
           <div 
             class="progress-marker"
-            :style="{ left: duration > 0 ? (currentPosition / duration * 100) + '%' : '0%' }"
+            :style="{ left: duration > 0 ? ((isDragging ? previewPosition : currentPosition) / duration * 100) + '%' : '0%' }"
           ></div>
         </div>
         <div 
@@ -431,6 +538,22 @@ onUnmounted(() => {
   background: #1db954;
   transition: width 0.1s linear;
   border-radius: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+.progress-bar-fill.no-transition {
+  transition: none;
+}
+
+.progress-bar-preview {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+  z-index: 2;
+  border-radius: 6px;
 }
 
 .progress-marker {
@@ -502,6 +625,10 @@ onUnmounted(() => {
 }
 
 @media (max-width: 640px) {
+  .player {
+    padding: 1rem;
+  }
+  
   .track-display {
     /* align-items: center; */
     /* text-align: center; */
