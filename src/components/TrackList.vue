@@ -1,7 +1,5 @@
 <script setup>
-import { defineProps, defineEmits } from 'vue';
-
-defineProps({
+const props = defineProps({
   tracks: {
     type: Array,
     required: true,

@@ -12,6 +12,7 @@ const error = ref(null);
 
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) {
+    searchResults.value = [];
     return;
   }
 

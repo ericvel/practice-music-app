@@ -116,7 +116,7 @@ class SpotifyApiService {
    */
   async skipForward(ms = 10000) {
     const state = await this.getPlaybackState();
-    if (state && state.is_playing) {
+    if (state && state.item) {
       const newPosition = Math.min(
         state.progress_ms + ms,
         state.item.duration_ms
@@ -130,7 +130,7 @@ class SpotifyApiService {
    */
   async skipBackward(ms = 10000) {
     const state = await this.getPlaybackState();
-    if (state && state.is_playing) {
+    if (state && state.item) {
       const newPosition = Math.max(0, state.progress_ms - ms);
       return this.seek(newPosition);
     }
