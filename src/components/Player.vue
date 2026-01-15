@@ -29,6 +29,8 @@ const isDraggingLoopStart = ref(false);
 const isDraggingLoopEnd = ref(false);
 const skipInterval = ref(10);
 const showSettings = ref(false);
+const isRewindLoading = ref(false);
+const isForwardLoading = ref(false);
 let dragStartTime = 0;
 let stateInterval = null;
 
@@ -121,9 +123,9 @@ const togglePlayPause = async () => {
 };
 
 const rewind10s = async () => {
-  if (isLoading.value) return;
+  if (isRewindLoading.value) return;
 
-  isLoading.value = true;
+  isRewindLoading.value = true;
   error.value = null;
 
   try {
@@ -150,14 +152,14 @@ const rewind10s = async () => {
   } catch (err) {
     error.value = err.message;
   } finally {
-    isLoading.value = false;
+    isRewindLoading.value = false;
   }
 };
 
 const forward10s = async () => {
-  if (isLoading.value) return;
+  if (isForwardLoading.value) return;
 
-  isLoading.value = true;
+  isForwardLoading.value = true;
   error.value = null;
 
   try {
@@ -184,7 +186,7 @@ const forward10s = async () => {
   } catch (err) {
     error.value = err.message;
   } finally {
-    isLoading.value = false;
+    isForwardLoading.value = false;
   }
 };
 
@@ -720,7 +722,6 @@ onUnmounted(() => {
     <div class="controls">
       <button
         @click="rewind10s"
-        :disabled="isLoading"
         class="control-btn"
         :title="`Rewind ${skipInterval} seconds`"
       >
@@ -728,7 +729,6 @@ onUnmounted(() => {
       </button>
       <button
         @click="togglePlayPause"
-        :disabled="isLoading"
         class="control-btn play-pause"
       >
         <Play v-if="!isPlaying" />
@@ -736,7 +736,6 @@ onUnmounted(() => {
       </button>
       <button
         @click="forward10s"
-        :disabled="isLoading"
         class="control-btn"
         :title="`Forward ${skipInterval} seconds`"
       >
@@ -762,32 +761,27 @@ onUnmounted(() => {
 
       <Transition name="loop-expand">
         <div v-if="loopEnabled" class="loop-controls">
-          <div class="loop-time-input-group">
-            <label class="loop-time-label">Start:</label>
-            <input
-              type="text"
-              :value="formatTime(loopStart)"
-              @change="handleLoopStartInput"
-              @blur="handleLoopStartInput"
-              :disabled="!loopEnabled"
-              class="loop-time-input"
-              placeholder="0:00"
-              title="Set Loop Start (MM:SS)"
-            />
-          </div>
-          <div class="loop-time-input-group">
-            <label class="loop-time-label">End:</label>
-            <input
-              type="text"
-              :value="formatTime(loopEnd)"
-              @change="handleLoopEndInput"
-              @blur="handleLoopEndInput"
-              :disabled="!loopEnabled"
-              class="loop-time-input"
-              placeholder="0:00"
-              title="Set Loop End (MM:SS)"
-            />
-          </div>
+          <input
+            type="text"
+            :value="formatTime(loopStart)"
+            @change="handleLoopStartInput"
+            @blur="handleLoopStartInput"
+            :disabled="!loopEnabled"
+            class="loop-time-input"
+            placeholder="0:00"
+            aria-label="Loop start time (MM:SS)"
+          />
+          <span class="loop-separator">–</span>
+          <input
+            type="text"
+            :value="formatTime(loopEnd)"
+            @change="handleLoopEndInput"
+            @blur="handleLoopEndInput"
+            :disabled="!loopEnabled"
+            class="loop-time-input"
+            placeholder="0:00"
+            aria-label="Loop end time (MM:SS)"
+          />
         </div>
       </Transition>
     </div>
@@ -901,10 +895,10 @@ onUnmounted(() => {
 }
 
 .player {
-  background: white;
-  border-radius: 12px;
+  background: linear-gradient(to bottom, #ffffff, #fafafa);
+  border-radius: 16px;
   padding: 2rem;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
   transition: all 0.3s ease;
   position: relative;
 }
@@ -1051,7 +1045,7 @@ onUnmounted(() => {
 .controls {
   display: flex;
   justify-content: center;
-  gap: 1rem;
+  gap: 1.5rem;
   margin-bottom: 1.5rem;
   align-items: center;
 }
@@ -1132,8 +1126,16 @@ onUnmounted(() => {
 .loop-controls {
   display: flex;
   justify-content: center;
-  gap: 2rem;
+  align-items: center;
+  gap: 0.75rem;
   overflow: hidden;
+}
+
+.loop-separator {
+  font-size: 1.2rem;
+  color: #666;
+  font-weight: 400;
+  user-select: none;
 }
 
 .loop-expand-enter-active {
@@ -1154,18 +1156,6 @@ onUnmounted(() => {
 .loop-expand-leave-from {
   height: auto;
   opacity: 1;
-}
-
-.loop-time-input-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.loop-time-label {
-  font-size: 0.9rem;
-  color: #666;
-  font-weight: 500;
 }
 
 .loop-time-input {
@@ -1346,39 +1336,62 @@ onUnmounted(() => {
 }
 
 .control-btn {
-  background: #667eea;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
   padding: 20px 40px;
-  border-radius: 8px;
-  font-weight: 600;
+  border-radius: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.3s;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25),
+    0 1px 2px rgba(102, 126, 234, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
 .control-btn:hover:not(:disabled) {
-  background: #5568d3;
+  background: linear-gradient(135deg, #7c92f5 0%, #8b5cb8 100%);
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.35),
+    0 2px 4px rgba(102, 126, 234, 0.2);
+  transform: scale(1.08);
+}
+
+.control-btn:active:not(:disabled) {
+  transform: scale(1.02);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.25);
 }
 
 .control-btn:disabled {
-  background: #ccc;
+  background: #f0f0f0;
   cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .control-btn.play-pause {
   background: #1db954;
-  padding: 32px 32px;
-  border-radius: 50%;
+  color: white;
   width: 68px;
   height: 68px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 0;
+  flex: none;
+  box-shadow: 0 4px 16px rgba(29, 185, 84, 0.35),
+    0 2px 4px rgba(29, 185, 84, 0.2);
 }
 
 .control-btn.play-pause:hover:not(:disabled) {
   background: #1ed760;
+  box-shadow: 0 6px 24px rgba(29, 185, 84, 0.45),
+    0 3px 8px rgba(29, 185, 84, 0.25);
+  transform: scale(1.08);
+}
+
+.control-btn.play-pause:active:not(:disabled) {
+  transform: scale(1.02);
+  box-shadow: 0 4px 16px rgba(29, 185, 84, 0.35);
 }
 
 @media (max-width: 640px) {
