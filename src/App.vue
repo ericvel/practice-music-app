@@ -1,6 +1,7 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import spotifyAuth from './services/spotifyAuth';
+import spotifyPlayer from './services/spotifyPlayer';
 import SearchBar from './components/SearchBar.vue';
 import TrackList from './components/TrackList.vue';
 import Player from './components/Player.vue';
@@ -11,13 +12,16 @@ const isLoading = ref(false);
 const error = ref(null);
 
 onMounted(async () => {
-  // Check if we're on the callback page
-  if (window.location.pathname === '/callback') {
+  // Check if we have an authorization code in the URL (Spotify callback)
+  const urlParams = new URLSearchParams(window.location.search);
+  const code = urlParams.get('code');
+  
+  if (code) {
     isLoading.value = true;
     try {
       await spotifyAuth.handleCallback();
       isAuthenticated.value = true;
-      // Redirect to home
+      // Clean up URL by removing the code parameter
       window.history.replaceState({}, '', '/');
     } catch (err) {
       error.value = err.message;
@@ -29,11 +33,17 @@ onMounted(async () => {
   }
 });
 
+onUnmounted(() => {
+  // Clean up player when app unmounts
+  spotifyPlayer.disconnect();
+});
+
 const handleLogin = () => {
   spotifyAuth.login();
 };
 
 const handleLogout = () => {
+  spotifyPlayer.disconnect();
   spotifyAuth.logout();
   isAuthenticated.value = false;
   selectedTrack.value = null;

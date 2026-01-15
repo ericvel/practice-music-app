@@ -38,6 +38,9 @@ const handleKeyPress = (e) => {
 
 const handleTrackSelect = (track) => {
   emit('track-select', track);
+  // Clear search results after selecting a track
+  searchResults.value = [];
+  searchQuery.value = '';
 };
 </script>
 
