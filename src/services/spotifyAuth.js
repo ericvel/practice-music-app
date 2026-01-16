@@ -11,7 +11,8 @@ const SCOPES = [
   'user-read-currently-playing',
   'user-read-email',
   'user-read-private',
-  'streaming'
+  'streaming',
+  'user-read-recently-played',
 ];
 
 /**

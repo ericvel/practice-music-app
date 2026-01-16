@@ -4,6 +4,14 @@ const props = defineProps({
     type: Array,
     required: true,
   },
+  selectedIndex: {
+    type: Number,
+    default: -1,
+  },
+  title: {
+    type: String,
+    default: '',
+  },
 });
 
 const emit = defineEmits(['select']);
@@ -21,13 +29,14 @@ const formatDuration = (ms) => {
 
 <template>
   <div class="track-list">
-    <h3>Search Results</h3>
+    <h3 v-if="title">{{ title }}</h3>
     <div class="tracks">
       <div
-        v-for="track in tracks"
+        v-for="(track, index) in tracks"
         :key="track.id"
         @click="handleSelect(track)"
         class="track-item"
+        :class="{ 'track-selected': index === selectedIndex }"
       >
         <img
           v-if="track.album.images.length > 0"
@@ -47,20 +56,18 @@ const formatDuration = (ms) => {
 
 <style scoped>
 .track-list {
-  margin-top: 1.5rem;
+  padding: 0.5rem;
 }
 
 h3 {
   color: #333;
   margin-bottom: 1rem;
   font-size: 1.1rem;
+  padding: 0 0.5rem;
 }
 
 .tracks {
-  max-height: 400px;
-  overflow-y: auto;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  /* Scrolling handled by parent dropdown container */
 }
 
 .track-item {
@@ -78,6 +85,12 @@ h3 {
 
 .track-item:hover {
   background: #f8f8f8;
+}
+
+.track-item.track-selected {
+  background: #e8edff;
+  border-left: 4px solid #667eea;
+  padding-left: calc(0.75rem - 4px);
 }
 
 .track-image {

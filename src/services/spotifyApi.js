@@ -148,6 +148,13 @@ class SpotifyApiService {
   async getTrack(trackId) {
     return this.makeRequest(`/tracks/${trackId}`);
   }
+
+  /**
+   * Get recently played tracks
+   */
+  async getRecentlyPlayed(limit = 10) {
+    return this.makeRequest(`/me/player/recently-played?limit=${limit}`);
+  }
 }
 
 export default new SpotifyApiService();

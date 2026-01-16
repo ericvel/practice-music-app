@@ -1,5 +1,5 @@
 <script setup>
-import { ref, defineProps, onMounted, onUnmounted, watch } from "vue";
+import { ref, defineProps, onMounted, onUnmounted, watch, computed } from "vue";
 import { Rewind, Play, Pause, FastForward, Settings } from "lucide-vue-next";
 import spotifyApi from "../services/spotifyApi";
 import spotifyPlayer from "../services/spotifyPlayer";
@@ -7,7 +7,8 @@ import spotifyPlayer from "../services/spotifyPlayer";
 const props = defineProps({
   track: {
     type: Object,
-    required: true,
+    required: false,
+    default: null,
   },
 });
 
@@ -31,8 +32,15 @@ const skipInterval = ref(10);
 const showSettings = ref(false);
 const isRewindLoading = ref(false);
 const isForwardLoading = ref(false);
+const isTrackLoading = ref(false);
+const playButtonRef = ref(null);
 let dragStartTime = 0;
 let stateInterval = null;
+
+// Computed property to determine if we should show skeleton
+const shouldShowSkeleton = computed(() => {
+  return !props.track || isTrackLoading.value;
+});
 
 const initializePlayer = async () => {
   try {
@@ -617,7 +625,12 @@ const handleClickOutside = (event) => {
 watch(
   () => props.track,
   async (newTrack, oldTrack) => {
-    if (newTrack && oldTrack && newTrack.id !== oldTrack.id) {
+    // Immediately show loading state when track prop changes
+    if (!newTrack || (newTrack && oldTrack && newTrack.id !== oldTrack.id)) {
+      isTrackLoading.value = true;
+    }
+    
+    if (newTrack && (!oldTrack || newTrack.id !== oldTrack.id)) {
       // Stop current playback and reset state
       stopStatePolling();
 
@@ -644,6 +657,15 @@ watch(
       loopStart.value = 0;
       loopEnd.value = 0;
       // Don't autoplay - user needs to press play button
+      
+      // Fallback to hide loading state after 500ms if image load event doesn't fire
+      setTimeout(() => {
+        isTrackLoading.value = false;
+        // Focus the play button after track loads
+        if (playButtonRef.value) {
+          playButtonRef.value.focus();
+        }
+      }, 500);
     }
 
     // Set duration whenever track changes
@@ -651,7 +673,7 @@ watch(
       duration.value = newTrack.duration_ms || 0;
     }
   },
-  { immediate: true }
+  { immediate: true, flush: 'sync' }
 );
 
 onMounted(() => {
@@ -700,19 +722,30 @@ onUnmounted(() => {
     </Transition>
 
     <div class="track-display">
-      <img
-        v-if="track.album.images.length > 0"
-        :src="track.album.images[0].url"
-        :alt="track.album.name"
-        class="album-art"
-      />
-      <div class="track-details">
-        <h2 class="track-title">{{ track.name }}</h2>
-        <p class="track-artists">
-          {{ track.artists.map((a) => a.name).join(", ") }}
-        </p>
-        <p class="track-album">{{ track.album.name }}</p>
+      <div v-if="shouldShowSkeleton" class="track-skeleton">
+        <div class="skeleton skeleton-album-art"></div>
+        <div class="track-details">
+          <div class="skeleton skeleton-title"></div>
+          <div class="skeleton skeleton-artists"></div>
+          <div class="skeleton skeleton-album"></div>
+        </div>
       </div>
+      <template v-else>
+        <img
+          v-if="track.album.images.length > 0"
+          :src="track.album.images[0].url"
+          :alt="track.album.name"
+          class="album-art"
+          @load="() => isTrackLoading = false"
+        />
+        <div class="track-details">
+          <h2 class="track-title">{{ track.name }}</h2>
+          <p class="track-artists">
+            {{ track.artists.map((a) => a.name).join(", ") }}
+          </p>
+          <p class="track-album">{{ track.album.name }}</p>
+        </div>
+      </template>
     </div>
 
     <div v-if="error" class="error-message">
@@ -730,6 +763,7 @@ onUnmounted(() => {
       <button
         @click="togglePlayPause"
         class="control-btn play-pause"
+        ref="playButtonRef"
       >
         <Play v-if="!isPlaying" />
         <Pause v-else />
@@ -999,6 +1033,56 @@ onUnmounted(() => {
   display: flex;
   gap: 1.5rem;
   margin-bottom: 2rem;
+}
+
+.track-skeleton {
+  display: flex;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #f0f0f0 25%,
+    #e8e8e8 50%,
+    #f0f0f0 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-album-art {
+  width: 120px;
+  height: 120px;
+  flex-shrink: 0;
+}
+
+.skeleton-title {
+  height: 28px;
+  width: 60%;
+  margin-bottom: 0.5rem;
+}
+
+.skeleton-artists {
+  height: 20px;
+  width: 45%;
+  margin-bottom: 0.5rem;
+}
+
+.skeleton-album {
+  height: 18px;
+  width: 40%;
 }
 
 .album-art {

@@ -33,6 +33,9 @@ const loadTrack = async (trackId) => {
   isLoading.value = true;
   error.value = null;
   
+  // Clear the current track to show loading state
+  track.value = null;
+  
   try {
     const trackData = await spotifyApi.getTrack(trackId);
     track.value = trackData;
@@ -63,15 +66,11 @@ const handleTrackSelect = (newTrack) => {
   <div class="track-view">
     <SearchBar @track-select="handleTrackSelect" />
     
-    <div v-if="isLoading" class="loading">
-      <p>Loading track...</p>
-    </div>
-    
-    <div v-else-if="error" class="error-message">
+    <div v-if="error" class="error-message">
       {{ error }}
     </div>
     
-    <Player v-else-if="track" :track="track" :key="track.id" />
+    <Player v-if="track || isLoading" :track="track" :key="track?.id || 'loading'" />
   </div>
 </template>
 
