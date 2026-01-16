@@ -9,12 +9,13 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v4
       - run: npm ci && npm run build
         env:
-          VITE_SPOTIFY_CLIENT_ID: ${{ env.VITE_SPOTIFY_CLIENT_ID }}
-          VITE_REDIRECT_URI: ${{ env.VITE_REDIRECT_URI }}
+          VITE_SPOTIFY_CLIENT_ID: ${{ vars.VITE_SPOTIFY_CLIENT_ID }}
+          VITE_REDIRECT_URI: ${{ vars.VITE_REDIRECT_URI }}
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
