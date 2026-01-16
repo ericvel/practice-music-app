@@ -1,4 +1,4 @@
-import spotifyAuth from './spotifyAuth';
+import spotifyAuth from "./spotifyAuth";
 
 /**
  * Spotify Web Playback SDK Service
@@ -12,7 +12,7 @@ class SpotifyPlayerService {
     this.readyPromise = null;
     this.readyResolve = null;
     this.readyReject = null;
-    
+
     // Set up the SDK ready callback immediately
     window.onSpotifyWebPlaybackSDKReady = () => {
       if (this.readyResolve) {
@@ -33,7 +33,7 @@ class SpotifyPlayerService {
     this.readyPromise = new Promise((resolve, reject) => {
       this.readyResolve = resolve;
       this.readyReject = reject;
-      
+
       // Check if SDK is already loaded
       if (window.Spotify) {
         this.initializePlayer(resolve, reject);
@@ -50,40 +50,42 @@ class SpotifyPlayerService {
   initializePlayer(resolve, reject) {
     const token = spotifyAuth.getAccessToken();
     if (!token) {
-      reject(new Error('No access token available'));
+      reject(new Error("No access token available"));
       return;
     }
 
     this.player = new window.Spotify.Player({
-      name: 'Music Practice App',
-      getOAuthToken: cb => { cb(token); },
-      volume: 0.5
+      name: "Rewindify",
+      getOAuthToken: (cb) => {
+        cb(token);
+      },
+      volume: 0.5,
     });
 
     // Ready
-    this.player.addListener('ready', ({ device_id }) => {
+    this.player.addListener("ready", ({ device_id }) => {
       this.deviceId = device_id;
       this.isReady = true;
       resolve(device_id);
     });
 
     // Not Ready
-    this.player.addListener('not_ready', ({ device_id }) => {
+    this.player.addListener("not_ready", ({ device_id }) => {
       this.isReady = false;
     });
 
     // Initialization Error
-    this.player.addListener('initialization_error', ({ message }) => {
+    this.player.addListener("initialization_error", ({ message }) => {
       reject(new Error(message));
     });
 
     // Authentication Error
-    this.player.addListener('authentication_error', ({ message }) => {
+    this.player.addListener("authentication_error", ({ message }) => {
       reject(new Error(message));
     });
 
     // Account Error
-    this.player.addListener('account_error', ({ message }) => {
+    this.player.addListener("account_error", ({ message }) => {
       reject(new Error(message));
     });
 
@@ -103,7 +105,7 @@ class SpotifyPlayerService {
    */
   async getCurrentState() {
     if (!this.player) {
-      throw new Error('Player not initialized');
+      throw new Error("Player not initialized");
     }
     return this.player.getCurrentState();
   }
@@ -113,7 +115,7 @@ class SpotifyPlayerService {
    */
   async togglePlay() {
     if (!this.player) {
-      throw new Error('Player not initialized');
+      throw new Error("Player not initialized");
     }
     return this.player.togglePlay();
   }
@@ -123,7 +125,7 @@ class SpotifyPlayerService {
    */
   async resume() {
     if (!this.player) {
-      throw new Error('Player not initialized');
+      throw new Error("Player not initialized");
     }
     return this.player.resume();
   }
@@ -133,7 +135,7 @@ class SpotifyPlayerService {
    */
   async pause() {
     if (!this.player) {
-      throw new Error('Player not initialized');
+      throw new Error("Player not initialized");
     }
     return this.player.pause();
   }
@@ -143,7 +145,7 @@ class SpotifyPlayerService {
    */
   async seek(positionMs) {
     if (!this.player) {
-      throw new Error('Player not initialized');
+      throw new Error("Player not initialized");
     }
     return this.player.seek(positionMs);
   }

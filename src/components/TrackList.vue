@@ -66,10 +66,6 @@ h3 {
   padding: 0 0.5rem;
 }
 
-.tracks {
-  /* Scrolling handled by parent dropdown container */
-}
-
 .track-item {
   display: flex;
   align-items: center;
@@ -96,7 +92,7 @@ h3 {
 .track-image {
   width: 48px;
   height: 48px;
-  border-radius: 4px;
+  border-radius: 6px;
   margin-right: 1rem;
   object-fit: cover;
 }

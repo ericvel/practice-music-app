@@ -1,8 +1,9 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
-import spotifyAuth from './services/spotifyAuth';
-import spotifyPlayer from './services/spotifyPlayer';
+import { ref, onMounted, onUnmounted } from "vue";
+import { useRouter } from "vue-router";
+import spotifyAuth from "./services/spotifyAuth";
+import spotifyPlayer from "./services/spotifyPlayer";
+import { Rewind } from "lucide-vue-next";
 
 const router = useRouter();
 const isAuthenticated = ref(false);
@@ -12,15 +13,15 @@ const error = ref(null);
 onMounted(async () => {
   // Check if we have an authorization code in the URL (Spotify callback)
   const urlParams = new URLSearchParams(window.location.search);
-  const code = urlParams.get('code');
-  
+  const code = urlParams.get("code");
+
   if (code) {
     isLoading.value = true;
     try {
       await spotifyAuth.handleCallback();
       isAuthenticated.value = true;
       // Clean up URL by removing the code parameter
-      window.history.replaceState({}, '', '/');
+      window.history.replaceState({}, "", "/");
     } catch (err) {
       error.value = err.message;
     } finally {
@@ -44,14 +45,16 @@ const handleLogout = () => {
   spotifyPlayer.disconnect();
   spotifyAuth.logout();
   isAuthenticated.value = false;
-  router.push('/');
+  router.push("/");
 };
 </script>
 
 <template>
   <div id="app">
     <header>
-      <h1>🎵 Music Practice App</h1>
+      <router-link to="/">
+        <h1><Rewind size="28" /> Rewindify</h1>
+      </router-link>
       <div v-if="isAuthenticated" class="user-section">
         <button @click="handleLogout" class="logout-btn">Logout</button>
       </div>
@@ -69,9 +72,14 @@ const handleLogout = () => {
 
       <div v-else-if="!isAuthenticated" class="login-container">
         <div class="login-card">
-          <h2>Welcome to Music Practice App</h2>
-          <p>Connect your Spotify account to start practicing with your favorite tracks.</p>
-          <button @click="handleLogin" class="login-btn">Login with Spotify</button>
+          <h2>Welcome to Rewindify</h2>
+          <p>
+            Connect your Spotify account to start practicing with your favorite
+            tracks.
+          </p>
+          <button @click="handleLogin" class="login-btn">
+            Login with Spotify
+          </button>
         </div>
       </div>
 
@@ -90,7 +98,8 @@ const handleLogout = () => {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, sans-serif;
   background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
   min-height: 100vh;
 }
@@ -112,8 +121,16 @@ header {
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
+a {
+  text-decoration: none;
+}
 h1 {
   font-size: 1.5rem;
+  color: #333;
+  text-decoration: none;
+  display: flex;
+  column-gap: 0.5rem;
+  align-items: center;
 }
 
 main {
@@ -128,8 +145,8 @@ main {
 .error {
   background: white;
   padding: 2rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .error p {
@@ -148,7 +165,7 @@ main {
   background: white;
   padding: 3rem;
   border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
   text-align: center;
   max-width: 400px;
 }
@@ -209,15 +226,15 @@ button {
   header {
     padding: 1rem;
   }
-  
+
   h1 {
     font-size: 1.2rem;
   }
-  
+
   main {
     padding: 1rem;
   }
-  
+
   .login-card {
     padding: 2rem 1.5rem;
     margin: 0 1rem;

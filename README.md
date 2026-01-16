@@ -1,4 +1,4 @@
-# 🎵 Music Practice App
+# ⏪︎ Rewindify
 
 A Vue 3 + Vite single-page application for music practice using the Spotify Web API. Features OAuth 2.0 Authorization Code Flow with PKCE for secure authentication.
 
@@ -26,7 +26,7 @@ A Vue 3 + Vite single-page application for music practice using the Spotify Web 
 2. Log in with your Spotify account
 3. Click "Create app"
 4. Fill in the app details:
-   - **App name**: Music Practice App (or any name you prefer)
+   - **App name**: Rewindify (or any name you prefer)
    - **App description**: A practice app for musicians
    - **Redirect URI**: `http://localhost:5173/callback`
    - **API/SDKs**: Select "Web API"

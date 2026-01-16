@@ -1,12 +1,12 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue';
-import { Loader2 } from 'lucide-vue-next';
-import spotifyApi from '../services/spotifyApi';
-import TrackList from './TrackList.vue';
+import { ref, watch, onMounted } from "vue";
+import { Loader2 } from "lucide-vue-next";
+import spotifyApi from "../services/spotifyApi";
+import TrackList from "./TrackList.vue";
 
-const emit = defineEmits(['track-select']);
+const emit = defineEmits(["track-select"]);
 
-const searchQuery = ref('');
+const searchQuery = ref("");
 const searchResults = ref([]);
 const recentTracks = ref([]);
 const isSearching = ref(false);
@@ -17,17 +17,17 @@ let debounceTimer = null;
 
 const loadRecentlyPlayed = async () => {
   try {
-    const response = await spotifyApi.getRecentlyPlayed(10);
+    const response = await spotifyApi.getRecentlyPlayed(50);
     // Extract unique tracks from recently played
     const tracksMap = new Map();
-    response.items.forEach(item => {
+    response.items.forEach((item) => {
       if (!tracksMap.has(item.track.id)) {
         tracksMap.set(item.track.id, item.track);
       }
     });
     recentTracks.value = Array.from(tracksMap.values());
   } catch (err) {
-    console.error('Failed to load recently played tracks:', err);
+    console.error("Failed to load recently played tracks:", err);
   }
 };
 
@@ -89,47 +89,59 @@ const handleBlur = () => {
 };
 
 const handleTrackSelect = (track) => {
-  emit('track-select', track);
+  emit("track-select", track);
   // Clear search results after selecting a track
   searchResults.value = [];
-  searchQuery.value = '';
+  searchQuery.value = "";
   isFocused.value = false;
   selectedIndex.value = -1;
 };
 
 const handleKeyDown = (event) => {
-  const currentTracks = searchResults.value.length > 0 ? searchResults.value : recentTracks.value;
-  const isDropdownOpen = searchResults.value.length > 0 || isSearching.value || (isFocused.value && !searchQuery.value.trim() && recentTracks.value.length > 0);
-  
+  const currentTracks =
+    searchResults.value.length > 0 ? searchResults.value : recentTracks.value;
+  const isDropdownOpen =
+    searchResults.value.length > 0 ||
+    isSearching.value ||
+    (isFocused.value &&
+      !searchQuery.value.trim() &&
+      recentTracks.value.length > 0);
+
   // Only handle Escape or if dropdown is open with tracks
-  if (!isDropdownOpen && event.key !== 'Escape') {
+  if (!isDropdownOpen && event.key !== "Escape") {
     return;
   }
 
-  if (!currentTracks.length && event.key !== 'Escape') {
+  if (!currentTracks.length && event.key !== "Escape") {
     return;
   }
 
   switch (event.key) {
-    case 'ArrowDown':
+    case "ArrowDown":
       event.preventDefault();
-      selectedIndex.value = Math.min(selectedIndex.value + 1, currentTracks.length - 1);
+      selectedIndex.value = Math.min(
+        selectedIndex.value + 1,
+        currentTracks.length - 1
+      );
       break;
-    case 'ArrowUp':
+    case "ArrowUp":
       event.preventDefault();
       selectedIndex.value = Math.max(selectedIndex.value - 1, -1);
       break;
-    case 'Enter':
-    case ' ':
+    case "Enter":
+    case " ":
       event.preventDefault();
-      if (selectedIndex.value >= 0 && selectedIndex.value < currentTracks.length) {
+      if (
+        selectedIndex.value >= 0 &&
+        selectedIndex.value < currentTracks.length
+      ) {
         handleTrackSelect(currentTracks[selectedIndex.value]);
       }
       break;
-    case 'Escape':
+    case "Escape":
       event.preventDefault();
       isFocused.value = false;
-      searchQuery.value = '';
+      searchQuery.value = "";
       searchResults.value = [];
       selectedIndex.value = -1;
       break;
@@ -163,12 +175,19 @@ onMounted(() => {
 
     <!-- Dropdown positioned absolutely -->
     <transition name="dropdown">
-      <div v-if="searchResults.length > 0 || isSearching || (isFocused && !searchQuery.trim() && recentTracks.length > 0)" class="search-dropdown">
+      <div
+        v-if="
+          searchResults.length > 0 ||
+          isSearching ||
+          (isFocused && !searchQuery.trim() && recentTracks.length > 0)
+        "
+        class="search-dropdown"
+      >
         <div v-if="isSearching" class="loading-container">
           <Loader2 class="spinning" />
           <span>Searching...</span>
         </div>
-        
+
         <div v-else-if="searchResults.length > 0" class="recent-tracks">
           <TrackList
             :tracks="searchResults"
@@ -177,8 +196,13 @@ onMounted(() => {
             @select="handleTrackSelect"
           />
         </div>
-        
-        <div v-else-if="isFocused && !searchQuery.trim() && recentTracks.length > 0" class="recent-tracks">
+
+        <div
+          v-else-if="
+            isFocused && !searchQuery.trim() && recentTracks.length > 0
+          "
+          class="recent-tracks"
+        >
           <TrackList
             :tracks="recentTracks"
             :selectedIndex="selectedIndex"
@@ -196,7 +220,7 @@ onMounted(() => {
   background: white;
   border-radius: 12px;
   padding: 1.5rem;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
   margin-bottom: 2rem;
   position: relative;
 }
@@ -222,7 +246,7 @@ onMounted(() => {
   width: 100%;
 }
 
-.search-input:focus {
+.search-input:focus-visible {
   outline: none;
   border-color: #667eea;
 }
@@ -261,7 +285,7 @@ onMounted(() => {
   padding: 0.75rem;
   background: #fee;
   color: #c33;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 0.9rem;
 }
 
@@ -273,7 +297,7 @@ onMounted(() => {
   margin-top: 0.5rem;
   background: white;
   border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
   z-index: 1000;
   max-height: 500px;
   overflow-y: auto;

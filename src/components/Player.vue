@@ -1,6 +1,14 @@
 <script setup>
 import { ref, defineProps, onMounted, onUnmounted, watch, computed } from "vue";
-import { Rewind, Play, Pause, FastForward, Settings } from "lucide-vue-next";
+import {
+  Rewind,
+  Play,
+  Pause,
+  FastForward,
+  Settings,
+  Trash2,
+  Save,
+} from "lucide-vue-next";
 import spotifyApi from "../services/spotifyApi";
 import spotifyPlayer from "../services/spotifyPlayer";
 
@@ -34,8 +42,13 @@ const isRewindLoading = ref(false);
 const isForwardLoading = ref(false);
 const isTrackLoading = ref(false);
 const playButtonRef = ref(null);
+const savedSegments = ref([]);
+const newSegmentName = ref("");
 let dragStartTime = 0;
 let stateInterval = null;
+let seekHoldInterval = null;
+let accumulatedSeekAmount = 0;
+let isHoldingSeek = false;
 
 // Computed property to determine if we should show skeleton
 const shouldShowSkeleton = computed(() => {
@@ -198,6 +211,92 @@ const forward10s = async () => {
   }
 };
 
+const startSeekHold = (direction) => {
+  if (isHoldingSeek) return;
+
+  isHoldingSeek = true;
+  accumulatedSeekAmount = 0;
+
+  // Add initial seek amount immediately for quick clicks
+  accumulatedSeekAmount =
+    (direction === "forward" ? 1 : -1) * skipInterval.value * 1000;
+
+  // Then continue accumulating if button is held
+  seekHoldInterval = setInterval(() => {
+    accumulatedSeekAmount +=
+      (direction === "forward" ? 1 : -1) * skipInterval.value * 1000;
+
+    // Update UI preview
+    const state = currentPosition.value;
+    let newPosition = state + accumulatedSeekAmount;
+
+    if (loopEnabled.value && loopEnd.value > loopStart.value) {
+      newPosition = Math.max(
+        loopStart.value,
+        Math.min(loopEnd.value, newPosition)
+      );
+    } else {
+      newPosition = Math.max(0, Math.min(duration.value, newPosition));
+    }
+
+    currentPosition.value = newPosition;
+  }, 100);
+};
+
+const endSeekHold = async (direction) => {
+  if (!isHoldingSeek) return;
+
+  isHoldingSeek = false;
+  if (seekHoldInterval) {
+    clearInterval(seekHoldInterval);
+    seekHoldInterval = null;
+  }
+
+  // Make seek request with accumulated amount
+  if (direction === "forward") {
+    isForwardLoading.value = true;
+  } else {
+    isRewindLoading.value = true;
+  }
+
+  error.value = null;
+
+  try {
+    const state = await spotifyPlayer.getCurrentState();
+    const position = state?.position ?? currentPosition.value;
+
+    let newPosition = position + accumulatedSeekAmount;
+
+    // If loop is enabled, constrain to loop boundaries
+    if (loopEnabled.value && loopEnd.value > loopStart.value) {
+      newPosition = Math.max(
+        loopStart.value,
+        Math.min(loopEnd.value, newPosition)
+      );
+    } else {
+      newPosition = Math.max(0, Math.min(duration.value, newPosition));
+    }
+
+    // If no current state, start playback first
+    if (!state || state.track_window?.current_track?.uri !== props.track.uri) {
+      await playTrack();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    await spotifyPlayer.seek(newPosition);
+    currentPosition.value = newPosition;
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    if (direction === "forward") {
+      isForwardLoading.value = false;
+    } else {
+      isRewindLoading.value = false;
+    }
+    accumulatedSeekAmount = 0;
+  }
+};
+
 const startStatePolling = () => {
   stopStatePolling();
   stateInterval = setInterval(async () => {
@@ -250,14 +349,14 @@ const parseTime = (timeString) => {
 
 const handleLoopStartInput = (event) => {
   const newTime = parseTime(event.target.value);
-  if (newTime >= 0 && newTime < loopEnd.value) {
+  if (newTime >= 0 && newTime < loopEnd.value - 5000) {
     loopStart.value = newTime;
   }
 };
 
 const handleLoopEndInput = (event) => {
   const newTime = parseTime(event.target.value);
-  if (newTime > loopStart.value && newTime <= duration.value) {
+  if (newTime > loopStart.value + 5000 && newTime <= duration.value) {
     loopEnd.value = newTime;
   }
 };
@@ -466,6 +565,14 @@ const handleKeyPress = (event) => {
       event.preventDefault();
       setLoopEnd();
       break;
+    case "KeyS":
+      event.preventDefault();
+      document
+        .querySelector(
+          'input[type="search"], input[placeholder*="Search"], .search-input'
+        )
+        ?.focus();
+      break;
   }
 };
 
@@ -496,6 +603,83 @@ const toggleLoop = async () => {
         // Ignore errors
       }
     }
+  }
+};
+
+const loadSavedSegments = () => {
+  if (!props.track?.id) return;
+  try {
+    const key = `segments_${props.track.id}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      savedSegments.value = JSON.parse(saved);
+    } else {
+      savedSegments.value = [];
+    }
+  } catch (err) {
+    console.error("Failed to load saved segments:", err);
+    savedSegments.value = [];
+  }
+};
+
+const saveSegment = () => {
+  if (!props.track?.id || !newSegmentName.value.trim()) return;
+  if (loopStart.value === loopEnd.value) {
+    error.value = "Please set loop markers before saving";
+    setTimeout(() => {
+      error.value = null;
+    }, 3000);
+    return;
+  }
+
+  const segment = {
+    id: Date.now(),
+    name: newSegmentName.value.trim(),
+    start: loopStart.value,
+    end: loopEnd.value,
+  };
+
+  savedSegments.value.push(segment);
+
+  try {
+    const key = `segments_${props.track.id}`;
+    localStorage.setItem(key, JSON.stringify(savedSegments.value));
+    newSegmentName.value = "";
+  } catch (err) {
+    error.value = "Failed to save segment";
+    savedSegments.value.pop();
+  }
+};
+
+const loadSegment = async (segment) => {
+  loopStart.value = segment.start;
+  loopEnd.value = segment.end;
+  loopEnabled.value = true;
+
+  // Update position for UI
+  currentPosition.value = segment.start;
+
+  // Only seek if track is currently playing
+  try {
+    const state = await spotifyPlayer.getCurrentState();
+    if (state && state.track_window?.current_track?.uri === props.track.uri) {
+      await spotifyPlayer.seek(segment.start);
+    }
+  } catch (err) {
+    console.error("Failed to load segment:", err);
+  }
+};
+
+const deleteSegment = (segmentId) => {
+  if (!props.track?.id) return;
+
+  savedSegments.value = savedSegments.value.filter((s) => s.id !== segmentId);
+
+  try {
+    const key = `segments_${props.track.id}`;
+    localStorage.setItem(key, JSON.stringify(savedSegments.value));
+  } catch (err) {
+    console.error("Failed to delete segment:", err);
   }
 };
 
@@ -542,7 +726,7 @@ const handleLoopStartDrag = (event) => {
     const percentage = offsetX / rect.width;
     const newPosition = Math.floor(percentage * duration.value);
 
-    loopStart.value = Math.min(newPosition, loopEnd.value - 1000);
+    loopStart.value = Math.min(newPosition, loopEnd.value - 5000);
   };
 
   const handleEnd = () => {
@@ -588,7 +772,7 @@ const handleLoopEndDrag = (event) => {
     const percentage = offsetX / rect.width;
     const newPosition = Math.floor(percentage * duration.value);
 
-    loopEnd.value = Math.max(newPosition, loopStart.value + 1000);
+    loopEnd.value = Math.max(newPosition, loopStart.value + 5000);
   };
 
   const handleEnd = () => {
@@ -629,7 +813,7 @@ watch(
     if (!newTrack || (newTrack && oldTrack && newTrack.id !== oldTrack.id)) {
       isTrackLoading.value = true;
     }
-    
+
     if (newTrack && (!oldTrack || newTrack.id !== oldTrack.id)) {
       // Stop current playback and reset state
       stopStatePolling();
@@ -657,14 +841,17 @@ watch(
       loopStart.value = 0;
       loopEnd.value = 0;
       // Don't autoplay - user needs to press play button
-      
+
       // Fallback to hide loading state after 500ms if image load event doesn't fire
       setTimeout(() => {
         isTrackLoading.value = false;
-        // Focus the play button after track loads
+        // Focus the play button after track loads (without showing focus ring)
         if (playButtonRef.value) {
-          playButtonRef.value.focus();
+          playButtonRef.value.focus({ preventScroll: true });
+          playButtonRef.value.blur();
         }
+        // Load saved segments for this track
+        loadSavedSegments();
       }, 500);
     }
 
@@ -673,7 +860,7 @@ watch(
       duration.value = newTrack.duration_ms || 0;
     }
   },
-  { immediate: true, flush: 'sync' }
+  { immediate: true, flush: "sync" }
 );
 
 onMounted(() => {
@@ -686,6 +873,9 @@ onUnmounted(() => {
   stopStatePolling();
   window.removeEventListener("keydown", handleKeyPress);
   document.removeEventListener("click", handleClickOutside);
+  if (seekHoldInterval) {
+    clearInterval(seekHoldInterval);
+  }
 });
 </script>
 
@@ -736,7 +926,7 @@ onUnmounted(() => {
           :src="track.album.images[0].url"
           :alt="track.album.name"
           class="album-art"
-          @load="() => isTrackLoading = false"
+          @load="() => (isTrackLoading = false)"
         />
         <div class="track-details">
           <h2 class="track-title">{{ track.name }}</h2>
@@ -754,7 +944,11 @@ onUnmounted(() => {
 
     <div class="controls">
       <button
-        @click="rewind10s"
+        @mousedown="startSeekHold('rewind')"
+        @mouseup="endSeekHold('rewind')"
+        @mouseleave="endSeekHold('rewind')"
+        @touchstart.prevent="startSeekHold('rewind')"
+        @touchend.prevent="endSeekHold('rewind')"
         class="control-btn"
         :title="`Rewind ${skipInterval} seconds`"
       >
@@ -769,55 +963,16 @@ onUnmounted(() => {
         <Pause v-else />
       </button>
       <button
-        @click="forward10s"
+        @mousedown="startSeekHold('forward')"
+        @mouseup="endSeekHold('forward')"
+        @mouseleave="endSeekHold('forward')"
+        @touchstart.prevent="startSeekHold('forward')"
+        @touchend.prevent="endSeekHold('forward')"
         class="control-btn"
         :title="`Forward ${skipInterval} seconds`"
       >
         <FastForward />
       </button>
-    </div>
-
-    <div class="loop-section">
-      <div class="loop-toggle-container">
-        <div class="loop-toggle-label" @click="toggleLoop">
-          <span class="loop-label-text">Loop Section</span>
-          <div class="toggle-switch">
-            <input
-              type="checkbox"
-              :checked="loopEnabled"
-              class="toggle-input"
-              readonly
-            />
-            <span class="toggle-slider"></span>
-          </div>
-        </div>
-      </div>
-
-      <Transition name="loop-expand">
-        <div v-if="loopEnabled" class="loop-controls">
-          <input
-            type="text"
-            :value="formatTime(loopStart)"
-            @change="handleLoopStartInput"
-            @blur="handleLoopStartInput"
-            :disabled="!loopEnabled"
-            class="loop-time-input"
-            placeholder="0:00"
-            aria-label="Loop start time (MM:SS)"
-          />
-          <span class="loop-separator">–</span>
-          <input
-            type="text"
-            :value="formatTime(loopEnd)"
-            @change="handleLoopEndInput"
-            @blur="handleLoopEndInput"
-            :disabled="!loopEnabled"
-            class="loop-time-input"
-            placeholder="0:00"
-            aria-label="Loop end time (MM:SS)"
-          />
-        </div>
-      </Transition>
     </div>
 
     <div class="progress-section" :class="{ 'loop-active': loopEnabled }">
@@ -920,6 +1075,102 @@ onUnmounted(() => {
         <span class="time-label">{{ formatTime(duration) }}</span>
       </div>
     </div>
+
+    <div class="loop-section">
+      <div class="loop-toggle-container">
+        <div class="loop-toggle-label" @click="toggleLoop">
+          <span class="loop-label-text">Loop Segment</span>
+          <div class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="loopEnabled"
+              class="toggle-input"
+              readonly
+            />
+            <span class="toggle-slider"></span>
+          </div>
+        </div>
+      </div>
+
+      <Transition name="loop-expand">
+        <div v-if="loopEnabled" class="loop-controls">
+          <input
+            type="text"
+            :value="formatTime(loopStart)"
+            @change="handleLoopStartInput"
+            @blur="handleLoopStartInput"
+            :disabled="!loopEnabled"
+            class="loop-time-input"
+            placeholder="0:00"
+            aria-label="Loop start time (MM:SS)"
+          />
+          <span class="loop-separator">–</span>
+          <input
+            type="text"
+            :value="formatTime(loopEnd)"
+            @change="handleLoopEndInput"
+            @blur="handleLoopEndInput"
+            :disabled="!loopEnabled"
+            class="loop-time-input"
+            placeholder="0:00"
+            aria-label="Loop end time (MM:SS)"
+          />
+        </div>
+      </Transition>
+    </div>
+
+    <Transition name="loop-expand">
+      <div v-if="loopEnabled" class="saved-segments-section">
+        <h4 class="saved-segments-title">Saved Segments</h4>
+
+        <div class="save-segment-form">
+          <input
+            v-model="newSegmentName"
+            type="text"
+            placeholder="Segment name..."
+            class="segment-name-input"
+            @keydown.enter="saveSegment"
+            maxlength="50"
+          />
+          <button
+            @click="saveSegment"
+            class="save-segment-btn"
+            :disabled="!newSegmentName.trim()"
+            title="Save current loop markers"
+          >
+            <Save :size="16" />
+            Save
+          </button>
+        </div>
+
+        <div v-if="savedSegments.length > 0" class="saved-segments-list">
+          <div
+            v-for="segment in savedSegments"
+            :key="segment.id"
+            class="saved-segment-item"
+          >
+            <button
+              @click="loadSegment(segment)"
+              class="segment-load-btn"
+              :title="`Load ${segment.name}`"
+            >
+              <span class="segment-name">{{ segment.name }}</span>
+              <span class="segment-time"
+                >{{ formatTime(segment.start) }} –
+                {{ formatTime(segment.end) }}</span
+              >
+            </button>
+            <button
+              @click="deleteSegment(segment.id)"
+              class="segment-delete-btn"
+              title="Delete segment"
+            >
+              <Trash2 :size="16" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -1006,7 +1257,7 @@ onUnmounted(() => {
   border-color: #667eea;
 }
 
-.settings-select:focus {
+.settings-select:focus-visible {
   outline: none;
   border-color: #667eea;
 }
@@ -1042,12 +1293,7 @@ onUnmounted(() => {
 }
 
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    #f0f0f0 25%,
-    #e8e8e8 50%,
-    #f0f0f0 75%
-  );
+  background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 8px;
@@ -1134,10 +1380,6 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.loop-section {
-  margin-bottom: 1rem;
-}
-
 .loop-toggle-container {
   display: flex;
   justify-content: center;
@@ -1196,7 +1438,7 @@ onUnmounted(() => {
 }
 
 .toggle-input:checked + .toggle-slider {
-  background-color: #1db954;
+  background-color: #6b7280;
 }
 
 .toggle-input:checked + .toggle-slider:before {
@@ -1204,7 +1446,7 @@ onUnmounted(() => {
 }
 
 .toggle-switch:hover .toggle-slider {
-  box-shadow: 0 0 1px #1db954;
+  box-shadow: 0 0 1px #6b7280;
 }
 
 .loop-controls {
@@ -1252,9 +1494,9 @@ onUnmounted(() => {
   transition: border-color 0.3s;
 }
 
-.loop-time-input:focus {
+.loop-time-input:focus-visible {
   outline: none;
-  border-color: #1db954;
+  border-color: #6b7280;
 }
 
 .loop-time-input:disabled {
@@ -1263,11 +1505,132 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
+.saved-segments-section {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.saved-segments-title {
+  font-size: 0.9rem;
+  color: #666;
+  margin-bottom: 1rem;
+  text-align: center;
+  font-weight: 500;
+}
+
+.save-segment-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.segment-name-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  transition: border-color 0.3s;
+  width: 100%;
+}
+
+.segment-name-input:focus-visible {
+  outline: none;
+  border-color: #6b7280;
+}
+
+.save-segment-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 8px 16px;
+  background: #6b7280;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.save-segment-btn:hover:not(:disabled) {
+  background: #6b7280;
+  filter: brightness(1.1);
+}
+
+.save-segment-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.saved-segments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.saved-segment-item {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.segment-load-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 10px 12px;
+  background: #f8f8f8;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.segment-load-btn:hover {
+  background: #e8edff;
+  border-color: #667eea;
+}
+
+.segment-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 0.25rem;
+}
+
+.segment-time {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.segment-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  background: #fee;
+  border: 2px solid #fdd;
+  border-radius: 6px;
+  color: #c33;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.segment-delete-btn:hover {
+  background: #fcc;
+  border-color: #fbb;
+}
+
 .progress-section {
   display: flex;
   flex-direction: column;
-  transition: translate ease-in 0.2s;
+  transition: translate ease-in-out 0.2s;
   translate: 0;
+  margin-bottom: 1.5rem;
 
   &.loop-active {
     translate: 0 1rem;
@@ -1277,7 +1640,6 @@ onUnmounted(() => {
 .time-display {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 2rem;
 }
 
 .time-label {
@@ -1298,12 +1660,7 @@ onUnmounted(() => {
   background: #e0e0e0;
   border-radius: 9999px;
   overflow: visible;
-  transition: height 0.2s;
   position: relative;
-}
-
-.progress-bar-container:hover .progress-bar-bg {
-  height: 28px;
 }
 
 .progress-bar-fill {
@@ -1345,7 +1702,7 @@ onUnmounted(() => {
   transform: translateX(-50%);
   width: 28px;
   height: 28px;
-  background: #1db954;
+  background: #6b7280;
   border: 3px solid white;
   border-radius: 50%;
   cursor: grab;
@@ -1369,17 +1726,17 @@ onUnmounted(() => {
   transform: translateX(-50%);
   width: 3px;
   height: 46px;
-  background: #1db954;
+  background: #6b7280;
   pointer-events: none;
   border-radius: 9999px;
 }
 
 .loop-marker-start .loop-marker-line {
-  background: #1db954;
+  background: #6b7280;
 }
 
 .loop-marker-end .loop-marker-line {
-  background: #1db954;
+  background: #6b7280;
 }
 
 .progress-marker {
@@ -1423,7 +1780,7 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
-  padding: 20px 40px;
+  padding: 24px 40px;
   border-radius: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -1458,8 +1815,8 @@ onUnmounted(() => {
 .control-btn.play-pause {
   background: #1db954;
   color: white;
-  width: 68px;
-  height: 68px;
+  width: 80px;
+  height: 80px;
   padding: 0;
   flex: none;
   box-shadow: 0 4px 16px rgba(29, 185, 84, 0.35),
@@ -1492,6 +1849,26 @@ onUnmounted(() => {
     height: 60px;
   }
 
+  .skeleton-album-art {
+    width: 60px;
+    height: 60px;
+  }
+
+  .skeleton-title {
+    height: 18px;
+    width: 70%;
+  }
+
+  .skeleton-artists {
+    height: 16px;
+    width: 50%;
+  }
+
+  .skeleton-album {
+    height: 14px;
+    width: 45%;
+  }
+
   .track-title {
     font-size: 0.9rem;
   }
@@ -1504,13 +1881,17 @@ onUnmounted(() => {
     font-size: 0.75rem;
   }
 
+  .controls {
+    gap: 1rem;
+  }
+
   .control-btn {
     padding: 24px 40px;
   }
 
   .control-btn.play-pause {
-    width: 52px;
-    height: 52px;
+    width: 56px;
+    height: 56px;
   }
 }
 </style>
